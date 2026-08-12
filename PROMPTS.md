@@ -36,7 +36,8 @@ Target codebases: financial instrument pricing libraries, roughly 1,000-5,000 Py
 files each. Three structural facts drive the design:
 
 1. Dispatch is class-hierarchy based — abstract bases with many concrete subclasses
-   — and implementations are also grouped by directory. There is no
+   — and implementations are also grouped by directory, often nested several levels
+   deep (e.g. instruments split by asset class beneath a common parent). There is no
    decorator-registry dispatch.
 2. Multiple inheritance is used. Classes routinely combine mixins, so the class
    graph is a DAG and method resolution follows Python's C3 linearization.
@@ -169,10 +170,28 @@ provider in MRO order wins, and every node is labelled with its providing class.
 
 --- clustering.py
 Group files by directory. A directory with 5 or more files whose classes mostly share
-one base becomes a "catalog" module; others are plain modules. Roll directories under
-3 files into their parent. Never split a directory alphabetically. When a directory's
-classes predominantly share one base, title the page from the base class rather than
-the folder name.
+one base becomes a "catalog" module; others are plain modules. Never split a
+directory alphabetically. When a directory's classes predominantly share one base,
+title the page from the base class rather than the folder name.
+
+Directory nesting is arbitrary and may be several levels deep. Preserve the tree
+rather than flattening it:
+
+- Module ids are full relative paths (insts/rates/exotics), not basenames, so two
+  directories sharing a leaf name under different parents never collide.
+- Each module records its parent module id. Page titles show the path from the
+  nearest meaningful ancestor, and the page list renders as a nested tree, not a
+  flat list.
+- Roll-up of small directories climbs at most ONE level. A directory with 2 files
+  merges into its parent; it does not then merge again. Repeated roll-up puts
+  distantly related files onto one page.
+- A package with subpackages (an __init__.py plus child directories) gets its own
+  page summarising its children even when its own file count is below the threshold
+  — that page is the reader's entry point into the subtree.
+- Catalog detection considers a directory together with its subdirectories: if
+  insts/rates/ and insts/credit/ each hold subclasses of the same base, the catalog
+  page covers the whole family and records which subdirectory each implementation
+  lives in, rather than splitting the override matrix across sibling pages.
 
 --- pairings.py
 Emit a bipartite graph from the import edges: for each file in one domain directory,
@@ -186,9 +205,11 @@ Write .codewiki/wiki/*.md and .codewiki/index/*.json.
 Priority order, because these repos have little inline documentation to display:
   1. Catalog page per hierarchy — the override matrix as a table, naming outliers
      explicitly: which subclasses override an unusual method, which leave one
-     abstract. Above 30 implementations, collapse the table into a summary
-     ("38 of 40 override price; 6 override greeks; 3 do not implement schedule")
-     and name the outliers. The outliers are the information.
+     abstract. Include a column for each implementation's subdirectory when the
+     family spans more than one, so the reader can see how the tree organises it.
+     Above 30 implementations, collapse the table into a summary ("38 of 40 override
+     price; 6 override greeks; 3 do not implement schedule") and name the outliers.
+     The outliers are the information.
   2. Node DAG page per class that has nodes — a mermaid graph, with inherited nodes
      marked with their providing class, and unresolved dependencies shown distinctly.
   3. Overview page — stats plus a mermaid graph of module dependencies.
@@ -209,6 +230,12 @@ pytest, covering at least:
   - C3 linearization for a class with three mixins, including a diamond
   - effective node set where a mixin provides a node the subclass does not override
   - a repo with no node decorators produces no DAG artifacts and no errors
+  - two directories with the same leaf name under different parents produce
+    distinct module ids and do not collide
+  - a directory of 2 files rolls up exactly one level, not repeatedly
+  - a catalog spanning several sibling subdirectories yields ONE page covering the
+    whole family, recording each implementation's subdirectory
+  - a deep relative import (from ...core.base import X) resolves correctly
 
 Finally write docs/DESIGN.md recording the architecture, the file formats, and the
 reasoning behind these decisions — including why AST is used for bulk extraction
@@ -405,7 +432,9 @@ Add a codewiki.open command that renders the wiki in a createWebviewPanel.
   the network may be proxied and the panel would silently degrade to unrendered
   markdown with no diagrams. Set localResourceRoots, build URIs with
   webview.asWebviewUri, and scope the CSP to webview.cspSource.
-- Sidebar listing all pages; main area renders the markdown.
+- Sidebar listing all pages as a collapsible tree following the module parent
+  relationships, not a flat list — repos nest several levels deep and a flat list
+  becomes unnavigable. Main area renders the markdown.
 - Rewrite [path:line] into clickable spans BEFORE markdown parsing, so the links
   survive into the rendered output. Clicking posts a message; the extension opens the
   document in ViewColumn.Two and reveals that line.
